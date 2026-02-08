@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Gamepad2, Mail, Lock, User, Eye, EyeOff, ArrowLeft, Loader2, AlertCircle, Gift } from 'lucide-react';
+import { Gamepad2, Mail, Lock, User, Eye, EyeOff, ArrowLeft, Loader2, AlertCircle, Gift, CheckCircle } from 'lucide-react';
 import { auth, googleProvider, db } from '@/lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { 
@@ -10,12 +10,12 @@ import {
   createUserWithEmailAndPassword, 
   signInWithPopup,
   updateProfile,
-  onAuthStateChanged
+  onAuthStateChanged,
+  sendEmailVerification
 } from 'firebase/auth';
 
 const FREE_CREDITS = 1;
 
-// Initialize user in Firestore with free credits
 async function initializeUserInFirestore(userId: string, email: string, displayName?: string) {
   try {
     const userRef = doc(db, 'users', userId);
@@ -30,7 +30,6 @@ async function initializeUserInFirestore(userId: string, email: string, displayN
         totalCreditsUsed: 0,
         totalCreditsPurchased: 0,
       });
-      console.log(`User ${userId} initialized with ${FREE_CREDITS} free credits`);
     }
   } catch (error) {
     console.error('Error initializing user:', error);
@@ -43,6 +42,7 @@ export default function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   
   const [formData, setFormData] = useState({
@@ -54,6 +54,8 @@ export default function AuthPage() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
+        // Google ile giriş yapanlar direkt geçsin (Google zaten doğrulanmış)
+        // Email ile giriş yapanlar da geçsin, generator'da kontrol edilecek
         router.push('/generator');
       } else {
         setCheckingAuth(false);
@@ -80,6 +82,7 @@ export default function AuthPage() {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
+    setSuccess(null);
 
     try {
       if (!formData.email || !formData.password) {
@@ -95,15 +98,27 @@ export default function AuthPage() {
       }
 
       if (isLogin) {
+        // LOGIN
         const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
         await initializeUserInFirestore(userCredential.user.uid, formData.email, userCredential.user.displayName || '');
+        router.push('/generator');
       } else {
+        // SIGN UP - Email doğrulama gönder
         const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+        
         await updateProfile(userCredential.user, { displayName: formData.name });
         await initializeUserInFirestore(userCredential.user.uid, formData.email, formData.name);
+        
+        // 🔥 EMAIL DOĞRULAMA GÖNDER
+        await sendEmailVerification(userCredential.user);
+        
+        setSuccess('✅ Account created! Please check your email and click the verification link.');
+        
+        // 3 saniye sonra generator'a yönlendir
+        setTimeout(() => {
+          router.push('/generator');
+        }, 3000);
       }
-      
-      router.push('/generator');
       
     } catch (err: any) {
       console.error('Auth error:', err);
@@ -165,15 +180,24 @@ export default function AuthPage() {
               <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center gap-3">
                 <Gift className="w-6 h-6 text-emerald-400" />
                 <div>
-                  <p className="text-emerald-400 font-medium text-sm">🎉 Get 2 Free Credits!</p>
-                  <p className="text-emerald-400/70 text-xs">Create your first GDDs for free</p>
+                  <p className="text-emerald-400 font-medium text-sm">🎉 Get 1 Free Credit!</p>
+                  <p className="text-emerald-400/70 text-xs">Create your first GDD for free</p>
                 </div>
               </div>
             )}
 
+            {/* Success Message */}
+            {success && (
+              <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center gap-3">
+                <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                <span className="text-emerald-400 text-sm">{success}</span>
+              </div>
+            )}
+
+            {/* Error Message */}
             {error && (
               <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center gap-3">
-                <AlertCircle className="w-5 h-5 text-red-400" />
+                <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
                 <span className="text-red-400 text-sm">{error}</span>
               </div>
             )}
@@ -229,7 +253,7 @@ export default function AuthPage() {
 
             <p className="text-center text-slate-400 text-sm mt-6">
               {isLogin ? "Don't have an account?" : 'Already have an account?'}
-              <button onClick={() => { setIsLogin(!isLogin); setError(null); }} className="text-violet-400 hover:text-violet-300 ml-2 font-medium">{isLogin ? 'Sign Up' : 'Sign In'}</button>
+              <button onClick={() => { setIsLogin(!isLogin); setError(null); setSuccess(null); }} className="text-violet-400 hover:text-violet-300 ml-2 font-medium">{isLogin ? 'Sign Up' : 'Sign In'}</button>
             </p>
           </div>
         </div>

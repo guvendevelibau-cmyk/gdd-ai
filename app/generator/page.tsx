@@ -1,12 +1,11 @@
 'use client';
 
-export const dynamic = "force-dynamic";
 import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Gamepad2, ChevronRight, ChevronLeft, Sparkles, Plus, Trash2, Check, Loader2, Target, Swords, BookOpen, Users, Map, Palette, Music, Cpu, Coins, Megaphone, AlertCircle, X, Download, Copy, FileText, CheckCircle, Linkedin, Mail, LogOut, User } from 'lucide-react';
+import { Gamepad2, ChevronRight, ChevronLeft, Sparkles, Plus, Trash2, Check, Loader2, Target, Swords, BookOpen, Users, Map, Palette, Music, Cpu, Coins, Megaphone, AlertCircle, X, Download, Copy, FileText, CheckCircle, Linkedin, Mail, LogOut, User, RefreshCw, MailWarning } from 'lucide-react';
 import { auth, db } from '@/lib/firebase';
 import { doc, getDoc, updateDoc, increment } from 'firebase/firestore';
-import { onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
+import { onAuthStateChanged, signOut, sendEmailVerification, User as FirebaseUser } from 'firebase/auth';
 import PricingModal from '@/components/PricingModal';
 
 interface Character { name: string; role: string; description: string; abilities: string; }
@@ -25,18 +24,105 @@ const SECTIONS = [
   { id: 'monetization', title: 'Business', icon: Coins }, { id: 'marketing', title: 'Marketing', icon: Megaphone },
 ];
 
-// SearchParams'ı ayrı component'te kullan
 function PurchaseSuccessHandler({ onSuccess }: { onSuccess: () => void }) {
   const searchParams = useSearchParams();
-  
   useEffect(() => {
     if (searchParams.get('purchase') === 'success') {
       onSuccess();
       window.history.replaceState({}, '', '/generator');
     }
   }, [searchParams, onSuccess]);
-  
   return null;
+}
+
+// 🔥 EMAIL DOĞRULAMA UYARI COMPONENTI
+function EmailVerificationBanner({ user, onResend }: { user: FirebaseUser; onResend: () => void }) {
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  const handleResend = async () => {
+    setSending(true);
+    try {
+      await sendEmailVerification(user);
+      setSent(true);
+      onResend();
+    } catch (error) {
+      console.error('Error sending verification email:', error);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleRefresh = () => {
+    window.location.reload();
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 flex flex-col">
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-violet-500/10 rounded-full blur-[120px] animate-pulse" />
+        <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-fuchsia-500/10 rounded-full blur-[120px] animate-pulse" />
+      </div>
+
+      <main className="flex-1 flex items-center justify-center px-4">
+        <div className="relative z-10 w-full max-w-md">
+          <div className="bg-slate-900/80 backdrop-blur-xl rounded-3xl border border-amber-500/30 p-8 shadow-2xl text-center">
+            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center mx-auto mb-6 shadow-lg shadow-amber-500/30">
+              <MailWarning className="w-10 h-10 text-white" />
+            </div>
+            
+            <h1 className="text-2xl font-bold text-white mb-2">Verify Your Email</h1>
+            <p className="text-slate-400 text-sm mb-6">
+              We sent a verification link to<br />
+              <span className="text-amber-400 font-medium">{user.email}</span>
+            </p>
+
+            <div className="space-y-4">
+              <p className="text-slate-500 text-xs">
+                Please check your inbox and click the verification link to continue.
+              </p>
+
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={handleRefresh}
+                  className="w-full py-3 bg-gradient-to-r from-violet-500 to-fuchsia-600 text-white rounded-xl font-semibold hover:from-violet-400 hover:to-fuchsia-500 transition-all flex items-center justify-center gap-2"
+                >
+                  <RefreshCw className="w-5 h-5" />
+                  I've Verified - Refresh
+                </button>
+
+                <button
+                  onClick={handleResend}
+                  disabled={sending || sent}
+                  className="w-full py-3 bg-slate-800/50 text-slate-300 rounded-xl font-medium border border-violet-500/20 hover:bg-slate-800 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {sending ? (
+                    <><Loader2 className="w-5 h-5 animate-spin" /> Sending...</>
+                  ) : sent ? (
+                    <><CheckCircle className="w-5 h-5 text-emerald-400" /> Email Sent!</>
+                  ) : (
+                    <><Mail className="w-5 h-5" /> Resend Verification Email</>
+                  )}
+                </button>
+
+                <button
+                  onClick={async () => { await signOut(auth); window.location.href = '/auth'; }}
+                  className="w-full py-3 text-slate-500 hover:text-slate-300 text-sm transition-all flex items-center justify-center gap-2"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Sign Out & Use Different Email
+                </button>
+              </div>
+
+              <p className="text-slate-600 text-xs mt-4">
+                💡 Tip: Check your spam folder if you don't see the email.
+              </p>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
 }
 
 function GDDGeneratorContent() {
@@ -44,6 +130,7 @@ function GDDGeneratorContent() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [credits, setCredits] = useState<number>(0);
   const [authLoading, setAuthLoading] = useState(true);
+  const [emailVerified, setEmailVerified] = useState(true);
   const [currentStep, setCurrentStep] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -64,8 +151,24 @@ function GDDGeneratorContent() {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
-      if (u) { setUser(u); await fetchCredits(u.uid); setAuthLoading(false); }
-      else router.push('/auth');
+      if (u) {
+        setUser(u);
+        
+        // 🔥 EMAIL DOĞRULAMA KONTROLÜ
+        // Google ile giriş yapanlar otomatik doğrulanmış sayılır
+        const isGoogleUser = u.providerData.some(p => p.providerId === 'google.com');
+        const isVerified = u.emailVerified || isGoogleUser;
+        
+        setEmailVerified(isVerified);
+        
+        if (isVerified) {
+          await fetchCredits(u.uid);
+        }
+        
+        setAuthLoading(false);
+      } else {
+        router.push('/auth');
+      }
     });
     return () => unsub();
   }, [router]);
@@ -142,11 +245,22 @@ function GDDGeneratorContent() {
     }
   };
 
-  if (authLoading) return (<div className="min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 flex items-center justify-center"><Loader2 className="w-10 h-10 text-violet-500 animate-spin" /></div>);
+  // Loading state
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 flex items-center justify-center">
+        <Loader2 className="w-10 h-10 text-violet-500 animate-spin" />
+      </div>
+    );
+  }
+
+  // 🔥 EMAIL DOĞRULANMADIYSA UYARI GÖSTER
+  if (user && !emailVerified) {
+    return <EmailVerificationBanner user={user} onResend={() => {}} />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 flex flex-col">
-      {/* Suspense içinde SearchParams handler */}
       <Suspense fallback={null}>
         <PurchaseSuccessHandler onSuccess={handlePurchaseSuccess} />
       </Suspense>
@@ -255,7 +369,6 @@ function GDDGeneratorContent() {
   );
 }
 
-// Ana export - Suspense ile sarılmış
 export default function GDDGeneratorPage() {
   return <GDDGeneratorContent />;
 }
