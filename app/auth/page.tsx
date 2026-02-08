@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Gamepad2, Mail, Lock, User, Eye, EyeOff, ArrowLeft, Loader2, AlertCircle, Gift, CheckCircle } from 'lucide-react';
+import { Gamepad2, Mail, Lock, User, Eye, EyeOff, ArrowLeft, Loader2, AlertCircle, Gift, CheckCircle, X, KeyRound } from 'lucide-react';
 import { auth, googleProvider, db } from '@/lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { 
@@ -11,7 +11,8 @@ import {
   signInWithPopup,
   updateProfile,
   onAuthStateChanged,
-  sendEmailVerification
+  sendEmailVerification,
+  sendPasswordResetEmail
 } from 'firebase/auth';
 
 const FREE_CREDITS = 1;
@@ -36,6 +37,152 @@ async function initializeUserInFirestore(userId: string, email: string, displayN
   }
 }
 
+// 🔥 FORGOT PASSWORD MODAL
+function ForgotPasswordModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) {
+      setError('Please enter your email address.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setSent(true);
+    } catch (err: any) {
+      console.error('Password reset error:', err);
+      if (err.code === 'auth/user-not-found') {
+        setError('No account found with this email.');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('Invalid email address.');
+      } else {
+        setError('Failed to send reset email. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClose = () => {
+    setEmail('');
+    setSent(false);
+    setError(null);
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+      <div className="w-full max-w-md bg-gradient-to-b from-slate-900 to-indigo-950 rounded-3xl border border-violet-500/30 overflow-hidden shadow-2xl animate-fadeIn">
+        {/* Header */}
+        <div className="relative p-6 border-b border-violet-500/20 bg-slate-900/80">
+          <button onClick={handleClose} className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-all">
+            <X className="w-5 h-5" />
+          </button>
+          
+          <div className="text-center">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-violet-500/30">
+              <KeyRound className="w-8 h-8 text-white" />
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">Reset Password</h2>
+            <p className="text-slate-400 text-sm">
+              {sent ? 'Check your inbox!' : "Enter your email and we'll send you a reset link."}
+            </p>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="p-6">
+          {sent ? (
+            <div className="text-center space-y-4">
+              <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto">
+                <CheckCircle className="w-8 h-8 text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-white font-medium mb-2">Email Sent!</p>
+                <p className="text-slate-400 text-sm">
+                  We've sent a password reset link to<br />
+                  <span className="text-violet-400 font-medium">{email}</span>
+                </p>
+              </div>
+              <p className="text-slate-500 text-xs">
+                💡 Check your spam folder if you don't see it.
+              </p>
+              <button
+                onClick={handleClose}
+                className="w-full py-3 bg-gradient-to-r from-violet-500 to-fuchsia-600 text-white rounded-xl font-semibold hover:from-violet-400 hover:to-fuchsia-500 transition-all"
+              >
+                Back to Login
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {error && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
+                  <span className="text-red-400 text-sm">{error}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Email Address</label>
+                <div className="relative">
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full h-12 pl-12 pr-4 rounded-xl bg-slate-800/50 border border-violet-500/20 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
+                    placeholder="you@example.com"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-3 bg-gradient-to-r from-violet-500 to-fuchsia-600 text-white rounded-xl font-semibold hover:from-violet-400 hover:to-fuchsia-500 transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <><Loader2 className="w-5 h-5 animate-spin" /> Sending...</>
+                ) : (
+                  'Send Reset Link'
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleClose}
+                className="w-full py-3 text-slate-400 hover:text-white text-sm transition-all"
+              >
+                Cancel
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
+
+      <style jsx global>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: scale(0.95); }
+          to { opacity: 1; transform: scale(1); }
+        }
+        .animate-fadeIn { animation: fadeIn 0.2s ease-out; }
+      `}</style>
+    </div>
+  );
+}
+
 export default function AuthPage() {
   const router = useRouter();
   const [isLogin, setIsLogin] = useState(true);
@@ -44,6 +191,7 @@ export default function AuthPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -54,8 +202,6 @@ export default function AuthPage() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
-        // Google ile giriş yapanlar direkt geçsin (Google zaten doğrulanmış)
-        // Email ile giriş yapanlar da geçsin, generator'da kontrol edilecek
         router.push('/generator');
       } else {
         setCheckingAuth(false);
@@ -98,23 +244,17 @@ export default function AuthPage() {
       }
 
       if (isLogin) {
-        // LOGIN
         const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
         await initializeUserInFirestore(userCredential.user.uid, formData.email, userCredential.user.displayName || '');
         router.push('/generator');
       } else {
-        // SIGN UP - Email doğrulama gönder
         const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
-        
         await updateProfile(userCredential.user, { displayName: formData.name });
         await initializeUserInFirestore(userCredential.user.uid, formData.email, formData.name);
-        
-        // 🔥 EMAIL DOĞRULAMA GÖNDER
         await sendEmailVerification(userCredential.user);
         
         setSuccess('✅ Account created! Please check your email and click the verification link.');
         
-        // 3 saniye sonra generator'a yönlendir
         setTimeout(() => {
           router.push('/generator');
         }, 3000);
@@ -186,7 +326,6 @@ export default function AuthPage() {
               </div>
             )}
 
-            {/* Success Message */}
             {success && (
               <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center gap-3">
                 <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
@@ -194,7 +333,6 @@ export default function AuthPage() {
               </div>
             )}
 
-            {/* Error Message */}
             {error && (
               <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center gap-3">
                 <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
@@ -237,7 +375,19 @@ export default function AuthPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Password</label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-slate-300">Password</label>
+                  {/* 🔥 FORGOT PASSWORD LİNKİ */}
+                  {isLogin && (
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotPassword(true)}
+                      className="text-xs text-violet-400 hover:text-violet-300 transition-colors"
+                    >
+                      Forgot Password?
+                    </button>
+                  )}
+                </div>
                 <div className="relative">
                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
                   <input type={showPassword ? 'text' : 'password'} value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })} className="w-full h-12 pl-12 pr-12 rounded-xl bg-slate-800/50 border border-violet-500/20 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all" placeholder="••••••••" />
@@ -266,6 +416,12 @@ export default function AuthPage() {
           </div>
         </div>
       </footer>
+
+      {/* 🔥 FORGOT PASSWORD MODAL */}
+      <ForgotPasswordModal 
+        isOpen={showForgotPassword} 
+        onClose={() => setShowForgotPassword(false)} 
+      />
     </div>
   );
 }
