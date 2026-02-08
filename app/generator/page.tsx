@@ -1,5 +1,6 @@
 'use client';
 
+export const dynamic = "force-dynamic";
 import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Gamepad2, ChevronRight, ChevronLeft, Sparkles, Plus, Trash2, Check, Loader2, Target, Swords, BookOpen, Users, Map, Palette, Music, Cpu, Coins, Megaphone, AlertCircle, X, Download, Copy, FileText, CheckCircle, Linkedin, Mail, LogOut, User } from 'lucide-react';
