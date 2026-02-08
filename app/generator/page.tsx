@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Gamepad2, ChevronRight, ChevronLeft, Sparkles, Plus, Trash2, Check, Loader2, Target, Swords, BookOpen, Users, Map, Palette, Music, Cpu, Coins, Megaphone, AlertCircle, X, Download, Copy, FileText, CheckCircle, Linkedin, Mail, LogOut, User } from 'lucide-react';
 import { auth, db } from '@/lib/firebase';
@@ -24,9 +24,22 @@ const SECTIONS = [
   { id: 'monetization', title: 'Business', icon: Coins }, { id: 'marketing', title: 'Marketing', icon: Megaphone },
 ];
 
-export default function GDDGeneratorPage() {
-  const router = useRouter();
+// SearchParams'ı ayrı component'te kullan
+function PurchaseSuccessHandler({ onSuccess }: { onSuccess: () => void }) {
   const searchParams = useSearchParams();
+  
+  useEffect(() => {
+    if (searchParams.get('purchase') === 'success') {
+      onSuccess();
+      window.history.replaceState({}, '', '/generator');
+    }
+  }, [searchParams, onSuccess]);
+  
+  return null;
+}
+
+function GDDGeneratorContent() {
+  const router = useRouter();
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [credits, setCredits] = useState<number>(0);
   const [authLoading, setAuthLoading] = useState(true);
@@ -56,17 +69,11 @@ export default function GDDGeneratorPage() {
     return () => unsub();
   }, [router]);
 
-  // Satın alma sonrası başarı mesajı
-  useEffect(() => {
-    if (searchParams.get('purchase') === 'success') {
-      setSuccessMessage('🎉 Purchase successful! Your credits have been added.');
-      // Kredileri yeniden çek
-      if (user) fetchCredits(user.uid);
-      // URL'den parametreyi kaldır
-      window.history.replaceState({}, '', '/generator');
-      setTimeout(() => setSuccessMessage(null), 5000);
-    }
-  }, [searchParams, user]);
+  const handlePurchaseSuccess = () => {
+    setSuccessMessage('🎉 Purchase successful! Your credits have been added.');
+    if (user) fetchCredits(user.uid);
+    setTimeout(() => setSuccessMessage(null), 5000);
+  };
 
   const handleLogout = async () => { await signOut(auth); router.push('/'); };
 
@@ -138,6 +145,11 @@ export default function GDDGeneratorPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 flex flex-col">
+      {/* Suspense içinde SearchParams handler */}
+      <Suspense fallback={null}>
+        <PurchaseSuccessHandler onSuccess={handlePurchaseSuccess} />
+      </Suspense>
+
       <div className="fixed inset-0 overflow-hidden pointer-events-none"><div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-violet-500/10 rounded-full blur-[120px] animate-pulse" /><div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-fuchsia-500/10 rounded-full blur-[120px] animate-pulse" /></div>
       
       <header className="relative z-20 border-b border-violet-500/20 bg-slate-900/80 backdrop-blur-xl sticky top-0">
@@ -150,14 +162,13 @@ export default function GDDGeneratorPage() {
             <button onClick={() => setShowPricing(true)} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 rounded-xl text-amber-400 hover:bg-amber-500/30 transition-all">
               <Coins className="w-4 h-4" /><span className="font-semibold">{credits}</span><span className="text-xs">Credits</span>
             </button>
-            {user && (<div className="flex items-center gap-2 text-slate-400"><div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center overflow-hidden">{user.photoURL ? <img src={user.photoURL} className="w-8 h-8 rounded-full" /> : <User className="w-4 h-4 text-violet-400" />}</div><span className="text-sm hidden md:block">{user.displayName || user.email?.split('@')[0]}</span></div>)}
+            {user && (<div className="flex items-center gap-2 text-slate-400"><div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center overflow-hidden">{user.photoURL ? <img src={user.photoURL} className="w-8 h-8 rounded-full" alt="" /> : <User className="w-4 h-4 text-violet-400" />}</div><span className="text-sm hidden md:block">{user.displayName || user.email?.split('@')[0]}</span></div>)}
             <button onClick={handleLogout} className="flex items-center gap-2 px-4 py-2 text-sm text-slate-400 hover:text-white border border-violet-500/20 rounded-xl hover:bg-violet-500/10"><LogOut className="w-4 h-4" /><span className="hidden md:block">Sign Out</span></button>
           </div>
         </div>
       </header>
 
       <main className="relative z-10 flex-1 max-w-6xl mx-auto px-6 py-8 w-full">
-        {/* Success Message */}
         {successMessage && (
           <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center gap-3">
             <CheckCircle className="w-5 h-5 text-emerald-400" />
@@ -201,12 +212,11 @@ export default function GDDGeneratorPage() {
       <footer className="relative z-10 border-t border-violet-500/20 bg-slate-900/80 backdrop-blur-xl mt-auto">
         <div className="max-w-6xl mx-auto px-6 py-6 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3"><div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center"><Gamepad2 className="w-4 h-4 text-white" /></div><span className="text-slate-400 text-sm">© 2025 GDD AI</span></div>
-          <div className="flex items-center gap-6"><a href="mailto:guvendevelibau@gmail.com" className="flex items-center gap-2 text-slate-400 hover:text-violet-400"><Mail className="w-4 h-4" /><span className="text-sm">guvendevelibau@gmail.com</span></a><a href="https://www.linkedin.com/in/güven-develi-650054396" target="_blank" className="flex items-center gap-2 text-slate-400 hover:text-violet-400"><Linkedin className="w-4 h-4" /><span className="text-sm">LinkedIn</span></a></div>
+          <div className="flex items-center gap-6"><a href="mailto:guvendevelibau@gmail.com" className="flex items-center gap-2 text-slate-400 hover:text-violet-400"><Mail className="w-4 h-4" /><span className="text-sm">guvendevelibau@gmail.com</span></a><a href="https://www.linkedin.com/in/güven-develi-650054396" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-slate-400 hover:text-violet-400"><Linkedin className="w-4 h-4" /><span className="text-sm">LinkedIn</span></a></div>
           <div className="text-slate-500 text-sm">Made with <span className="text-red-500">♥</span> by <span className="text-violet-400">Güven Develi</span></div>
         </div>
       </footer>
 
-      {/* PRICING MODAL - userId ve userEmail eklendi! */}
       <PricingModal 
         isOpen={showPricing} 
         onClose={() => setShowPricing(false)} 
@@ -230,7 +240,7 @@ export default function GDDGeneratorPage() {
             <div className="flex border-b border-violet-500/20 bg-slate-900/50">{[{ id: 'gdd', label: 'Document', icon: FileText }, { id: 'flowchart', label: 'Flow Chart', icon: Target }, { id: 'tables', label: 'Tables', icon: Cpu }].map(t => (<button key={t.id} onClick={() => setActiveTab(t.id as any)} className={`flex items-center gap-2 px-6 py-3 text-sm border-b-2 ${activeTab === t.id ? 'text-violet-400 border-violet-500 bg-violet-500/10' : 'text-slate-400 border-transparent'}`}><t.icon className="w-4 h-4" />{t.label}</button>))}</div>
             <div className="flex-1 overflow-y-auto p-6">
               {activeTab === 'gdd' && <pre className="whitespace-pre-wrap text-slate-300 text-sm leading-relaxed font-sans">{result.gddText}</pre>}
-              {activeTab === 'flowchart' && result.mermaidChartCode && (<div className="p-6 bg-slate-800/50 rounded-xl border border-violet-500/20"><h3 className="text-violet-400 font-semibold mb-4">Mermaid Code</h3><pre className="text-xs text-slate-400 bg-slate-900/50 p-4 rounded-lg overflow-x-auto">{result.mermaidChartCode}</pre><p className="text-xs text-slate-500 mt-3">View at <a href="https://mermaid.live" target="_blank" className="text-violet-400 hover:underline">mermaid.live</a></p></div>)}
+              {activeTab === 'flowchart' && result.mermaidChartCode && (<div className="p-6 bg-slate-800/50 rounded-xl border border-violet-500/20"><h3 className="text-violet-400 font-semibold mb-4">Mermaid Code</h3><pre className="text-xs text-slate-400 bg-slate-900/50 p-4 rounded-lg overflow-x-auto">{result.mermaidChartCode}</pre><p className="text-xs text-slate-500 mt-3">View at <a href="https://mermaid.live" target="_blank" rel="noopener noreferrer" className="text-violet-400 hover:underline">mermaid.live</a></p></div>)}
               {activeTab === 'tables' && result.mathTableHTML && (<div className="p-6 bg-slate-800/50 rounded-xl border border-violet-500/20"><h3 className="text-violet-400 font-semibold mb-4">Balance Tables</h3><div dangerouslySetInnerHTML={{ __html: result.mathTableHTML }} className="[&_table]:w-full [&_th]:bg-violet-500/20 [&_th]:text-violet-300 [&_th]:px-4 [&_th]:py-3 [&_td]:px-4 [&_td]:py-3 [&_td]:border-b [&_td]:border-violet-500/20 [&_td]:text-slate-300" /></div>)}
               {activeTab === 'flowchart' && !result.mermaidChartCode && <div className="text-center py-12 text-slate-500"><Target className="w-12 h-12 mx-auto mb-4 opacity-50" /><p>No chart available</p></div>}
               {activeTab === 'tables' && !result.mathTableHTML && <div className="text-center py-12 text-slate-500"><Cpu className="w-12 h-12 mx-auto mb-4 opacity-50" /><p>No tables available</p></div>}
@@ -242,4 +252,9 @@ export default function GDDGeneratorPage() {
       {isLoading && (<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-sm"><div className="bg-gradient-to-b from-slate-900 to-indigo-950 rounded-3xl p-8 text-center border border-violet-500/30 shadow-2xl max-w-sm w-full mx-4"><div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shadow-lg"><Sparkles className="w-10 h-10 text-white animate-pulse" /></div><h3 className="text-xl font-semibold text-white mb-2">Generating GDD</h3><p className="text-slate-400 text-sm mb-6">AI is creating your document...</p><div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden mb-3"><div className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all" style={{ width: `${progress}%` }} /></div><p className="text-violet-400 font-semibold text-lg">{Math.round(progress)}%</p></div></div>)}
     </div>
   );
+}
+
+// Ana export - Suspense ile sarılmış
+export default function GDDGeneratorPage() {
+  return <GDDGeneratorContent />;
 }
