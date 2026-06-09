@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Gamepad2, ChevronRight, ChevronLeft, Sparkles, Plus, Trash2, Check, Loader2, Target, Swords, BookOpen, Users, Map, Palette, Music, Cpu, Coins, Megaphone, AlertCircle, X, Download, Copy, FileText, CheckCircle, Linkedin, Mail, LogOut, User, RefreshCw, MailWarning } from 'lucide-react';
 import { auth, db } from '@/lib/firebase';
 import { doc, getDoc, updateDoc, increment } from 'firebase/firestore';
 import { onAuthStateChanged, signOut, sendEmailVerification, User as FirebaseUser } from 'firebase/auth';
 import PricingModal from '@/components/PricingModal';
+import ArcadeBackground from '@/components/ArcadeBackground';
 
 interface Character { name: string; role: string; description: string; abilities: string; }
 interface GDDFormData { gameName: string; tagline: string; genre: string; platform: string[]; targetAudience: string; esrbRating: string; uniqueSellingPoints: string; coreMechanics: string; controlScheme: string; gameLoops: string; progressionSystem: string; difficultySettings: string; multiplayerFeatures: string; storyPremise: string; worldSetting: string; mainConflict: string; narrativeStyle: string; characters: Character[]; levelCount: string; levelDesignPhilosophy: string; environmentTypes: string; artStyle: string; colorPalette: string; uiStyle: string; visualReferences: string; musicStyle: string; soundDesign: string; voiceActing: string; engine: string; minSpecs: string; targetFPS: string; saveSystem: string; businessModel: string; pricingStrategy: string; dlcPlans: string; targetLaunchDate: string; marketingChannels: string; competitorAnalysis: string; }
@@ -141,6 +142,22 @@ function GDDGeneratorContent() {
   const [activeTab, setActiveTab] = useState<'gdd' | 'flowchart' | 'tables'>('gdd');
   const [showPricing, setShowPricing] = useState(false);
 
+  // Arcade XP / score system
+  const [score, setScore] = useState(0);
+  const [xpToasts, setXpToasts] = useState<Array<{ id: number; text: string }>>([]);
+  const [stageClearVisible, setStageClearVisible] = useState(false);
+  const [stageClearText, setStageClearText] = useState('');
+  const filledFields = useRef<Set<string>>(new Set());
+  const toastId = useRef(0);
+
+  const triggerXP = (amount: number, label?: string) => {
+    setScore(prev => prev + amount);
+    const id = ++toastId.current;
+    const text = label ?? `+${amount} XP`;
+    setXpToasts(prev => [...prev.slice(-6), { id, text }]);
+    setTimeout(() => setXpToasts(prev => prev.filter(t => t.id !== id)), 1300);
+  };
+
   const fetchCredits = async (userId: string) => {
     try {
       const userRef = doc(db, 'users', userId);
@@ -190,7 +207,14 @@ function GDDGeneratorContent() {
     businessModel: '', pricingStrategy: '', dlcPlans: '', targetLaunchDate: '', marketingChannels: '', competitorAnalysis: '',
   });
 
-  const updateField = (f: keyof GDDFormData, v: any) => setFormData(p => ({ ...p, [f]: v }));
+  const updateField = (f: keyof GDDFormData, v: any) => {
+    const isFilled = Array.isArray(v) ? v.length > 0 : String(v).trim().length > 0;
+    if (isFilled && !filledFields.current.has(f)) {
+      filledFields.current.add(f);
+      triggerXP(50);
+    }
+    setFormData(p => ({ ...p, [f]: v }));
+  };
   const togglePlatform = (p: string) => updateField('platform', formData.platform.includes(p) ? formData.platform.filter(x => x !== p) : [...formData.platform, p]);
   const addChar = () => updateField('characters', [...formData.characters, { name: '', role: '', description: '', abilities: '' }]);
   const updateChar = (i: number, f: keyof Character, v: string) => updateField('characters', formData.characters.map((c, idx) => idx === i ? { ...c, [f]: v } : c));
@@ -205,20 +229,81 @@ function GDDGeneratorContent() {
     } catch (e) { return false; }
   };
 
+  const extractSection = (text: string, startMarker: string, endMarker: string): string => {
+    const start = text.indexOf(startMarker);
+    if (start === -1) return '';
+    const contentStart = start + startMarker.length;
+    const end = text.indexOf(endMarker, contentStart);
+    return (end === -1 ? text.slice(contentStart) : text.slice(contentStart, end)).trim();
+  };
+
   const handleGenerate = async () => {
     if (!formData.gameName || !formData.genre) { setError('Game name and genre required!'); return; }
     if (credits < 1) { setError('No credits! Purchase more to continue.'); setShowPricing(true); return; }
-    setIsLoading(true); setError(null); setProgress(0);
-    const iv = setInterval(() => setProgress(p => p >= 90 ? p : p + Math.random() * 10), 500);
+    setIsLoading(true); setError(null); setProgress(2);
+
     try {
-      const res = await fetch('/api/generate-gdd', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ formData, userId: user?.uid, userCredits: credits }) });
-      clearInterval(iv);
-      if (!res.ok) { const e = await res.json(); if (e.code === 'INSUFFICIENT_CREDITS') setShowPricing(true); throw new Error(e.error); }
-      const data = await res.json();
-      if (data.shouldDeductCredit) await deductCredit();
-      setProgress(100); setResult(data);
-    } catch (e: any) { setError(e.message); }
-    finally { setIsLoading(false); clearInterval(iv); }
+      const res = await fetch('/api/generate-gdd', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ formData, userId: user?.uid, userCredits: credits }),
+      });
+
+      if (!res.ok) {
+        const e = await res.json();
+        if (e.code === 'INSUFFICIENT_CREDITS') setShowPricing(true);
+        throw new Error(e.error);
+      }
+
+      // Stream the response — progress is driven by real bytes received
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = '';
+      const ESTIMATED_CHARS = 20000; // ~3000 words of JSON
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulated += decoder.decode(value, { stream: true });
+        const raw = (accumulated.length / ESTIMATED_CHARS) * 93;
+        setProgress(Math.min(93, Math.max(5, raw)));
+      }
+
+      setProgress(96);
+
+      // Parse delimiter-based response — robust to token cutoffs and markdown content
+      const gddText = extractSection(accumulated, '---GDD_DOCUMENT---', '---FLOW_CHART---')
+        || extractSection(accumulated, '---GDD_DOCUMENT---', '---END---')
+        || accumulated.trim();
+      const rawMermaid = extractSection(accumulated, '---FLOW_CHART---', '---BALANCE_TABLE---')
+        || extractSection(accumulated, '---FLOW_CHART---', '---END---')
+        || '';
+      const mermaidChartCode = rawMermaid.replace(/^```(?:mermaid)?\n?/,'').replace(/\n?```$/,'').trim();
+      const mathTableHTML = extractSection(accumulated, '---BALANCE_TABLE---', '---END---') || '';
+
+      if (!gddText) throw new Error('No GDD content received. Please try again.');
+
+      await deductCredit();
+      setProgress(100);
+      setResult({ gddText, mermaidChartCode, mathTableHTML });
+      triggerXP(2000, '🎮 GDD COMPLETE! +2000 XP');
+
+    } catch (e: any) {
+      setError(e.message || 'An unknown error occurred. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleNextStep = () => {
+    const next = Math.min(SECTIONS.length - 1, currentStep + 1);
+    triggerXP(200, '★ STAGE CLEAR!');
+    setStageClearText(SECTIONS[next].title.toUpperCase());
+    setStageClearVisible(true);
+    setTimeout(() => {
+      setStageClearVisible(false);
+      setCurrentStep(next);
+    }, 950);
   };
 
   const copyClip = async () => { if (result) { await navigator.clipboard.writeText(result.gddText); setCopied(true); setTimeout(() => setCopied(false), 2000); } };
@@ -265,7 +350,7 @@ function GDDGeneratorContent() {
         <PurchaseSuccessHandler onSuccess={handlePurchaseSuccess} />
       </Suspense>
 
-      <div className="fixed inset-0 overflow-hidden pointer-events-none"><div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-violet-500/10 rounded-full blur-[120px] animate-pulse" /><div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-fuchsia-500/10 rounded-full blur-[120px] animate-pulse" /></div>
+      <ArcadeBackground />
       
       <header className="relative z-20 border-b border-violet-500/20 bg-slate-900/80 backdrop-blur-xl sticky top-0">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -274,6 +359,12 @@ function GDDGeneratorContent() {
             <div><h1 className="text-xl font-bold bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">GDD Generator</h1><p className="text-xs text-slate-500">AI-Powered</p></div>
           </div>
           <div className="flex items-center gap-4">
+            {/* Arcade score */}
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-800/60 border border-violet-500/20 rounded-xl font-mono text-xs tabular-nums">
+              <span className="text-violet-400">▶</span>
+              <span className="text-slate-500">SCORE</span>
+              <span className="text-white font-bold tracking-wider">{String(score).padStart(6, '0')}</span>
+            </div>
             <button onClick={() => setShowPricing(true)} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 rounded-xl text-amber-400 hover:bg-amber-500/30 transition-all">
               <Coins className="w-4 h-4" /><span className="font-semibold">{credits}</span><span className="text-xs">Credits</span>
             </button>
@@ -318,7 +409,7 @@ function GDDGeneratorContent() {
                 <button onClick={handleGenerate} disabled={isLoading || credits < 1} className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-violet-500 to-fuchsia-600 text-white rounded-xl font-medium disabled:opacity-60 shadow-lg shadow-violet-500/30">
                   {isLoading ? <><Loader2 className="w-5 h-5 animate-spin" /><span>Generating... {Math.round(progress)}%</span></> : <><Sparkles className="w-5 h-5" /><span>Generate GDD</span><span className="text-xs opacity-75">(1 Credit)</span></>}
                 </button>
-              ) : (<button onClick={() => setCurrentStep(Math.min(SECTIONS.length - 1, currentStep + 1))} className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-violet-500 to-fuchsia-600 text-white rounded-xl shadow-lg">Next <ChevronRight className="w-5 h-5" /></button>)}
+              ) : (<button onClick={handleNextStep} className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-violet-500 to-fuchsia-600 text-white rounded-xl shadow-lg shadow-violet-500/30 hover:from-violet-400 hover:to-fuchsia-500 transition-all">Next <ChevronRight className="w-5 h-5" /></button>)}
             </div>
           </div>
         </div>
@@ -364,7 +455,52 @@ function GDDGeneratorContent() {
         </div>
       )}
 
-      {isLoading && (<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-sm"><div className="bg-gradient-to-b from-slate-900 to-indigo-950 rounded-3xl p-8 text-center border border-violet-500/30 shadow-2xl max-w-sm w-full mx-4"><div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shadow-lg"><Sparkles className="w-10 h-10 text-white animate-pulse" /></div><h3 className="text-xl font-semibold text-white mb-2">Generating GDD</h3><p className="text-slate-400 text-sm mb-6">AI is creating your document...</p><div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden mb-3"><div className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all" style={{ width: `${progress}%` }} /></div><p className="text-violet-400 font-semibold text-lg">{Math.round(progress)}%</p></div></div>)}
+      {isLoading && (<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-sm"><div className="bg-gradient-to-b from-slate-900 to-indigo-950 rounded-3xl p-8 text-center border border-violet-500/30 shadow-2xl max-w-sm w-full mx-4"><div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shadow-lg"><Sparkles className="w-10 h-10 text-white animate-pulse" /></div><h3 className="text-xl font-semibold text-white mb-2">Generating GDD</h3><p className="text-slate-400 text-sm mb-1">AI is streaming your document live...</p><p className="text-slate-500 text-xs mb-6">Usually 2–3 minutes — watch the bar move</p><div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden mb-3"><div className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all" style={{ width: `${progress}%` }} /></div><p className="text-violet-400 font-semibold text-lg">{Math.round(progress)}%</p></div></div>)}
+
+      {/* XP toast notifications */}
+      <div className="fixed bottom-24 right-6 z-40 flex flex-col-reverse gap-2 pointer-events-none">
+        {xpToasts.map(t => (
+          <div
+            key={t.id}
+            className="px-4 py-2 rounded-xl font-mono text-sm font-bold text-yellow-300 border border-yellow-400/30 bg-slate-900/80 backdrop-blur"
+            style={{
+              textShadow: '0 0 10px #fbbf24, 0 0 20px #fbbf2480',
+              boxShadow: '0 0 12px #fbbf2430',
+              animation: 'xpFloat 1.3s ease-out forwards',
+            }}
+          >
+            {t.text}
+          </div>
+        ))}
+      </div>
+
+      {/* Stage clear overlay */}
+      {stageClearVisible && (
+        <div className="fixed inset-0 z-40 flex flex-col items-center justify-center pointer-events-none">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+          <div className="relative z-10 text-center space-y-3">
+            <div
+              className="font-mono font-black text-5xl text-yellow-400 uppercase"
+              style={{
+                textShadow: '0 0 20px #fbbf24, 0 0 40px #fbbf2480',
+                animation: 'stageClear 0.95s ease-out forwards',
+              }}
+            >
+              STAGE CLEAR!
+            </div>
+            <div
+              className="font-mono text-xl text-violet-300 tracking-[0.4em] uppercase"
+              style={{
+                textShadow: '0 0 14px #a78bfa',
+                animation: 'stageClear 0.95s 0.1s ease-out forwards',
+                opacity: 0,
+              }}
+            >
+              {stageClearText}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
